@@ -58,6 +58,15 @@ namespace SemanticKeys
             if (string.IsNullOrEmpty(Guid)) Guid = System.Guid.NewGuid().ToString();
             if (string.IsNullOrEmpty(_domainName)) _domainName = name;
         }
+        /// <summary>
+        /// O(N) lookup. Used mainly by Editor scripts or initialization, not hot paths.
+        /// </summary>
+        public bool TryGetKeyByGuid(string guid, out string keyName)
+        {
+            var match = _keys.FirstOrDefault(k => k.Guid == guid);
+            keyName = match?.Name;
+            return match != null;
+        }
 
 #if UNITY_EDITOR
         // Called when value is changed in Inspector (including adding items to list)
