@@ -1,0 +1,16 @@
+# OS Junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Visual Studio / IDE
+.vs/
+*.user
+*.suo
+*.idea/
+*.csproj
+*.sln
+
+# Unity (If you accidentally copy .meta files for ignored folders)
+*.pidb.meta
+*.pdb.meta

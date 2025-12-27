@@ -1,0 +1,16 @@
+{
+    "name": "com.reactivesolutions.semantickeys.editor",
+    "rootNamespace": "",
+    "references": [
+        "GUID:2ee3c62ce761aa14fbefaf5c614a1711"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
