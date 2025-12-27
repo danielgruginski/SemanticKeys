@@ -1,6 +1,6 @@
 {
   "name": "com.reactivesolutions.semantickeys",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "displayName": "Semantic Keys",
   "description": "Semantic Keys aim to avoid the usage simple strings while allowing fast access to these values both from the Unity Inspector and as C# constants",
   "unity": "2021.3",
@@ -9,10 +9,7 @@
     "url": "https://github.com/danielgruginski"
   },
   "keywords": [
-    "attributes",
-    "stats",
-    "rpg",
-    "unirx",
-    "reactive"
+    "strings",
+    "inspector"
   ]
 }
