@@ -45,33 +45,33 @@ The system uses KeyDomain ScriptableObjects as the source of truth.
 
 The SemanticKey struct is designed to be a drop-in replacement for strings.
 
-using UnityEngine;  
-using SemanticKeys;
-
-public class PlayerStats : MonoBehaviour  
-{  
-    // Allows selection of ANY key from ANY domain  
-    public SemanticKey GeneralTag;
-
-    // Only allows selection of keys from the "Stats" domain  
-    \[SemanticKeyFilter("Stats")\]  
-    public SemanticKey StatType;
-
-    private void Start()  
+    using UnityEngine;  
+    using SemanticKeys;
+    
+    public class PlayerStats : MonoBehaviour  
     {  
-        // 1\. Implicit String Conversion  
-        // Works directly with Animator, MMEvent, etc.  
-        Debug.Log($"Selected Stat: {StatType}");   
-          
-        // 2\. Comparison  
-        // Compares GUIDs, not string values.   
-        // Safe even if "Strength" was renamed to "Might" in the editor.  
-        if (StatType \== Stats.Strength)   
+        // Allows selection of ANY key from ANY domain  
+        public SemanticKey GeneralTag;
+        
+        // Only allows selection of keys from the "Stats" domain  
+        \[SemanticKeyFilter("Stats")\]  
+        public SemanticKey StatType;
+    
+        private void Start()  
         {  
-            ApplyMultiplier(2.0f);  
+            // 1\. Implicit String Conversion  
+            // Works directly with Animator, MMEvent, etc.  
+            Debug.Log($"Selected Stat: {StatType}");   
+              
+            // 2\. Comparison  
+            // Compares GUIDs, not string values.   
+            // Safe even if "Strength" was renamed to "Might" in the editor.  
+            if (StatType \== Stats.Strength)   
+            {  
+                ApplyMultiplier(2.0f);  
+            }  
         }  
-    }  
-}
+    }
 
 ### **3\. Code Generation**
 
@@ -83,17 +83,17 @@ To use keys in code (e.g., Stats.Strength instead of StatType), you must generat
 
 **Output Example:**
 
-// Generated file: Stats.cs  
-namespace Game.Constants  
-{  
-    using SemanticKeys;
-
-    public static class Stats  
+    // Generated file: Stats.cs  
+    namespace Game.Constants  
     {  
-        public static readonly SemanticKey Strength \= new SemanticKey("guid...", "Strength", "domain\_guid...");  
-        public static readonly SemanticKey Agility \= new SemanticKey("guid...", "Agility", "domain\_guid...");  
-    }  
-}
+        using SemanticKeys;
+    
+        public static class Stats  
+        {  
+            public static readonly SemanticKey Strength \= new SemanticKey("guid...", "Strength", "domain\_guid...");  
+            public static readonly SemanticKey Agility \= new SemanticKey("guid...", "Agility", "domain\_guid...");  
+        }  
+    }
 
 ### **4\. Configuration**
 
