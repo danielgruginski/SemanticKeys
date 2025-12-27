@@ -15,8 +15,12 @@ It replaces fragile string literals with a robust, GUID-backed SemanticKey struc
 
 ## **Installation**
 
-1. Copy the com.ReactiveSolutions.SemanticKeys folder into your project's Packages folder (or Assets folder).  
-2. The package is self-contained and has no external dependencies.
+1. Open Unity and go to Window > Package Manager.
+2. Click the + button in the top-left corner.
+3. Select Add package from git URL....
+4. Enter the repository URL: https://github.com/danielgruginski/SemanticKeys.git
+
+The package is self-contained and has no external dependencies.
 
 ## **Usage**
 
