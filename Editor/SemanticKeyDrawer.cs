@@ -20,9 +20,10 @@ namespace SemanticKeys.Editor
 
             // Calculate Style
             var currentName = valueProp.stringValue;
+            // Treat empty string as "None" for UI display
             if (string.IsNullOrEmpty(currentName))
             {
-                currentName = "Select Key...";
+                currentName = "None";
             }
 
             var style = EditorStyles.popup;
@@ -44,7 +45,7 @@ namespace SemanticKeys.Editor
                 {
                     // Apply changes
                     guidProp.stringValue = item.Guid;
-                    valueProp.stringValue = item.name;
+                    valueProp.stringValue = item.Value;
                     domainGuidProp.stringValue = item.DomainGuid;
 
                     property.serializedObject.ApplyModifiedProperties();

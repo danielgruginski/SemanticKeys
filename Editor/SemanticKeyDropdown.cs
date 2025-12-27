@@ -16,33 +16,37 @@ namespace SemanticKeys.Editor
             _filterDomain = filterDomain;
             this.minimumSize = new Vector2(200, 300);
         }
-
         protected override AdvancedDropdownItem BuildRoot()
         {
-            // (Same as previous response, keeping it brief for the update)
             var root = new AdvancedDropdownItem("Semantic Keys");
 
-            // ... None Option ...
+            // --- 0. Add "None" Option ---
+            // Name shows "None", but Value and Guid are string.Empty
+            var noneItem = new SemanticKeyItem("None", string.Empty, string.Empty, string.Empty)
+            {
+                icon = (Texture2D)EditorGUIUtility.IconContent("d_Refresh").image
+            };
+            root.AddChild(noneItem);
 
-            // ... Create Domain Option ...
+            // Removed the separator "----" item to prevent selection bugs.
+
+            // --- 1. Create Domain Option ---
             if (string.IsNullOrEmpty(_filterDomain))
             {
-                var createDomainItem = new SemanticKeyItem(" + Create New Domain", null, null)
+                // Pass nulls for command items, handled in HandleCreation
+                var createDomainItem = new SemanticKeyItem(" + Create New Domain", null, null, null)
                 {
                     IsCreationCommand = true,
                     CreationType = SemanticKeyItem.CreationCommandType.CreateDomain
                 };
                 createDomainItem.icon = (Texture2D)EditorGUIUtility.IconContent("CreateAddNew").image;
                 root.AddChild(createDomainItem);
-                root.AddChild(new AdvancedDropdownItem("-----------------"));
             }
 
-            // ... Populate Lists ...
-            // (Standard AssetDatabase search logic here, same as previous file)
+            // --- 2. Populate Lists ---
             var guids = AssetDatabase.FindAssets("t:KeyDomain");
             foreach (var guid in guids)
             {
-                // ... (Load Domain logic) ...
                 var path = AssetDatabase.GUIDToAssetPath(guid);
                 var domain = AssetDatabase.LoadAssetAtPath<KeyDomain>(path);
                 if (domain == null) continue;
@@ -53,7 +57,7 @@ namespace SemanticKeys.Editor
                 var domainGroup = new AdvancedDropdownItem(domain.DomainName);
                 domainGroup.icon = (Texture2D)EditorGUIUtility.IconContent("ScriptableObject Icon").image;
 
-                var createKeyItem = new SemanticKeyItem(" + Add Key", null, domain.Guid)
+                var createKeyItem = new SemanticKeyItem(" + Add Key", null, null, domain.Guid)
                 {
                     IsCreationCommand = true,
                     CreationType = SemanticKeyItem.CreationCommandType.CreateKey,
@@ -64,7 +68,8 @@ namespace SemanticKeys.Editor
 
                 foreach (var key in domain.Keys)
                 {
-                    var item = new SemanticKeyItem(key.Name, key.Guid, domain.Guid);
+                    // Pass Name as both Name (UI) and Value (Data)
+                    var item = new SemanticKeyItem(key.Name, key.Name, key.Guid, domain.Guid);
                     item.icon = (Texture2D)EditorGUIUtility.IconContent("TextAsset Icon").image;
                     domainGroup.AddChild(item);
                 }
@@ -73,7 +78,6 @@ namespace SemanticKeys.Editor
 
             return root;
         }
-
         protected override void ItemSelected(AdvancedDropdownItem item)
         {
             if (item is SemanticKeyItem keyItem)
@@ -133,14 +137,13 @@ namespace SemanticKeys.Editor
             domain.AddKey(keyName);
             AssetDatabase.SaveAssets();
 
-            // UX: Auto-regenerate code when adding a key?
-            // Optional: domain.GenerateCode(); 
-            // Warning: This triggers compilation which interrupts the Editor workflow. 
-            // Better to let user manually click "Generate" or do it on a debounced timer.
+            // Use keyName for value, temp guid (real one generated inside AddKey)
+            // Ideally we'd fetch the real guid but for UI update 'temp' is fine as long as we reload or user re-selects later
+            // For immediate correctness, we can try to find the key we just added:
+            var addedKey = System.Linq.Enumerable.FirstOrDefault(domain.Keys, k => k.Name == keyName);
+            string realGuid = addedKey != null ? addedKey.Guid : "temp";
 
-            var newItem = new SemanticKeyItem(keyName, "temp", domain.Guid);
-            // Note: In real usage we need the real guid, but AddKey returns KeyDefinition so we can get it.
-            // Simplified here for brevity.
+            var newItem = new SemanticKeyItem(keyName, keyName, realGuid, domain.Guid);
             OnItemSelected?.Invoke(newItem);
         }
     }
