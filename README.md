@@ -9,8 +9,8 @@ It replaces fragile string literals with a robust, GUID-backed SemanticKey struc
 * **GUID-Backed Identity:** Keys are referenced by GUID. Renaming a key's display text does not break references in Prefabs or ScriptableObjects.  
 * **Zero-Overhead Runtime:** The SemanticKey struct implicitly converts to string using a cached value. No dictionary lookups occur during Update loops.  
 * **Inspector Integration:** Custom Property Drawer using Unity's AdvancedDropdown API. Support for searching, folders, and creating new keys directly from the Inspector.  
-* **Code Generation:** Generates static readonly classes (e.g., Stats.Strength) for compile-time safety in C\# scripts.  
-* **Domain Filtering:** Restrict Inspector fields to specific domains using \[SemanticKeyFilter\].  
+* **Code Generation:** Generates static readonly classes (e.g., Stats.Strength) for compile-time safety in C# scripts.  
+* **Domain Filtering:** Restrict Inspector fields to specific domains using [SemanticKeyFilter].  
 * **Settings:** Configurable paths for generated code and data storage.
 
 ## **Installation**
@@ -54,19 +54,19 @@ The SemanticKey struct is designed to be a drop-in replacement for strings.
         public SemanticKey GeneralTag;
         
         // Only allows selection of keys from the "Stats" domain  
-        \[SemanticKeyFilter("Stats")\]  
+        [SemanticKeyFilter("Stats")]  
         public SemanticKey StatType;
     
         private void Start()  
         {  
-            // 1\. Implicit String Conversion  
+            // 1. Implicit String Conversion  
             // Works directly with Animator, MMEvent, etc.  
             Debug.Log($"Selected Stat: {StatType}");   
               
-            // 2\. Comparison  
+            // 2. Comparison  
             // Compares GUIDs, not string values.   
             // Safe even if "Strength" was renamed to "Might" in the editor.  
-            if (StatType \== Stats.Strength)   
+            if (StatType == Stats.Strength)   
             {  
                 ApplyMultiplier(2.0f);  
             }  
@@ -90,8 +90,8 @@ To use keys in code (e.g., Stats.Strength instead of StatType), you must generat
     
         public static class Stats  
         {  
-            public static readonly SemanticKey Strength \= new SemanticKey("guid...", "Strength", "domain\_guid...");  
-            public static readonly SemanticKey Agility \= new SemanticKey("guid...", "Agility", "domain\_guid...");  
+            public static readonly SemanticKey Strength = new SemanticKey("guid...", "Strength", "domain_guid...");  
+            public static readonly SemanticKey Agility = new SemanticKey("guid...", "Agility", "domain_guid...");  
         }  
     }
 
@@ -103,7 +103,7 @@ You can customize where assets and scripts are stored.
 2. Select the SemanticKeysSettings asset (it is created automatically upon first use).  
 3. Modify:  
    * **Domain Creation Path:** Folder for new SOs created via the dropdown.  
-   * **Generated Code Path:** Folder for the static C\# classes.  
+   * **Generated Code Path:** Folder for the static C# classes.  
    * **Generated Namespace:** Namespace for the static classes (default: Game.Constants).
 
 ## **Architecture**
