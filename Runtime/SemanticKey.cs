@@ -10,6 +10,11 @@ namespace SemanticKeys
     [Serializable]
     public struct SemanticKey : IEquatable<SemanticKey>
     {
+        /// <summary>
+        /// Represents an empty/unassigned key.
+        /// </summary>
+        public static readonly SemanticKey None = new SemanticKey();
+
         // The immutable identity of this key.
         [SerializeField] private string _guid;
 
@@ -20,7 +25,7 @@ namespace SemanticKeys
         // Optional: Store the Domain ID if you want to enforce strict typing
         [SerializeField] private string _domainGuid;
 
-        public string Value => _value;
+        public string Value => _value ?? string.Empty;
         public string Guid => _guid;
         public bool IsValid => !string.IsNullOrEmpty(_guid) && !string.IsNullOrEmpty(_value);
 
@@ -33,21 +38,29 @@ namespace SemanticKeys
 
         // Implicit conversion allows drop-in replacement for string APIs
         // e.g., animator.SetTrigger(MySemanticKey);
-        public static implicit operator string(SemanticKey key) => key._value;
+        // Changed to return string.Empty if null to prevent NullReferenceExceptions in legacy code
+        public static implicit operator string(SemanticKey key) => key._value ?? string.Empty;
 
         public bool Equals(SemanticKey other)
         {
-            // We compare GUIDs for strict equality, not the string value
-            // This handles the case where "Strength" was renamed to "Might" 
-            // but the serialized object hasn't updated its cache yet.
-            return _guid == other._guid;
+            // We treat null and empty as the same identity (None)
+            var thisGuid = string.IsNullOrEmpty(_guid) ? string.Empty : _guid;
+            var otherGuid = string.IsNullOrEmpty(other._guid) ? string.Empty : other._guid;
+
+            return thisGuid == otherGuid;
         }
 
         public override bool Equals(object obj) => obj is SemanticKey other && Equals(other);
-        public override int GetHashCode() => _guid != null ? _guid.GetHashCode() : 0;
+
+        public override int GetHashCode()
+        {
+            // Must match Equals logic: treat null same as empty
+            return string.IsNullOrEmpty(_guid) ? 0 : _guid.GetHashCode();
+        }
+
         public static bool operator ==(SemanticKey left, SemanticKey right) => left.Equals(right);
         public static bool operator !=(SemanticKey left, SemanticKey right) => !left.Equals(right);
 
-        public override string ToString() => _value;
+        public override string ToString() => _value ?? string.Empty;
     }
 }
