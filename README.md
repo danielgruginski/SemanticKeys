@@ -106,7 +106,7 @@ You can customize where assets and scripts are stored.
    * **Generated Code Path:** Folder for the static C# classes.  
    * **Generated Namespace:** Namespace for the static classes (default: Game.Constants).
 
-### **4\. AI Disclosure**
+### **5\. AI Disclosure**
 
 This project was developed with significant assistance from Gemini (Version 3)
 
