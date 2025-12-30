@@ -61,18 +61,53 @@ namespace SemanticKeys.Editor
 
             if (GUILayout.Button("Replace All", GUILayout.Height(40)))
             {
+                // --- Domain Mismatch Check ---
+                var fromDomainGuid = _serializedContainer.FindProperty("From").FindPropertyRelative("_domainGuid")?.stringValue;
+                var toDomainProp = _serializedContainer.FindProperty("To").FindPropertyRelative("_domainGuid");
+                var toDomainGuid = toDomainProp?.stringValue;
+
+                if (fromDomainGuid != toDomainGuid)
+                {
+                    string fromName = GetDomainName(fromDomainGuid);
+                    string toName = GetDomainName(toDomainGuid);
+
+                    if (!EditorUtility.DisplayDialog("Domain Mismatch Warning",
+                        $"You are changing keys between different domains:\n\nFrom: '{fromName}'\nTo: '{toName}'\n\n" +
+                        "This may break fields restricted by [SemanticKeyFilter].\n\n" +
+                        "Do you want to proceed?",
+                        "Yes, Proceed", "Cancel"))
+                    {
+                        return;
+                    }
+                }
+
                 if (EditorUtility.DisplayDialog("Confirm Replace",
                     $"Are you sure you want to replace ALL references of '{_container.From.Value}' with '{_container.To.Value}'?\nThis cannot be easily undone.",
                     "Yes, Replace", "Cancel"))
                 {
-                    // Fetch the domain GUID safely via serialization since it might not be public on the struct
-                    var toProp = _serializedContainer.FindProperty("To");
-                    string toDomainGuid = toProp.FindPropertyRelative("_domainGuid")?.stringValue ?? "";
-
-                    ReplaceReferences(_container.From, _container.To, toDomainGuid);
+                    string safeToDomainGuid = toDomainGuid ?? "";
+                    ReplaceReferences(_container.From, _container.To, safeToDomainGuid);
                 }
             }
             GUI.enabled = true;
+        }
+
+        private string GetDomainName(string domainGuid)
+        {
+            if (string.IsNullOrEmpty(domainGuid)) return "None";
+
+            // O(N) lookup but N is small (number of domains) and this is a button click event.
+            var guids = AssetDatabase.FindAssets("t:KeyDomain");
+            foreach (var g in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(g);
+                var domain = AssetDatabase.LoadAssetAtPath<KeyDomain>(path);
+                if (domain != null && domain.Guid == domainGuid)
+                {
+                    return domain.DomainName;
+                }
+            }
+            return "Unknown";
         }
 
         private void ReplaceReferences(SemanticKey from, SemanticKey to, string toDomainGuid)
