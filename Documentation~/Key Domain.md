@@ -68,14 +68,14 @@ When you click **Generate Static Class**, the system:
 
 **Example Output:**
 
-namespace Game.Constants  
-{  
-    using SemanticKeys;
-
-    public static class Stats  
-    {  
-        public static readonly SemanticKey Strength \= new SemanticKey("guid-1...", "Strength", "domain-guid...");  
-        public static readonly SemanticKey Agility \= new SemanticKey("guid-2...", "Agility", "domain-guid...");  
-    }  
-}
+ namespace Game.Constants  
+ {  
+     using SemanticKeys;
+ 
+     public static class Stats  
+     {  
+         public static readonly SemanticKey Strength \= new SemanticKey("guid-1...", "Strength", "domain-guid...");  
+         public static readonly SemanticKey Agility \= new SemanticKey("guid-2...", "Agility", "domain-guid...");  
+     }  
+ }
 
