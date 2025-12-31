@@ -29,7 +29,7 @@ The `[SemanticKeyFilter]` attribute is used to restrict a `SemanticKey` field in
         public SemanticKey Category;
     
         // Only shows keys from the "ItemCategories" domain  
-        \[SemanticKeyFilter("ItemCategories")\]  
+        [SemanticKeyFilter("ItemCategories")]  
         public SemanticKey ItemType;  
     }
 
