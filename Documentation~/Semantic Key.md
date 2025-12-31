@@ -23,14 +23,14 @@ It acts as a hybrid:
 
 The struct includes an implicit operator to `string`. You can pass a `SemanticKey` directly into any Unity API that expects a string.
 
-\[SerializeField\] private SemanticKey \_animParameter;  
-\[SerializeField\] private Animator \_animator;
-
-private void Update()  
-{  
-    // Implicitly converts \_animParameter to its string Value  
-    \_animator.SetTrigger(\_animParameter);   
-}
+    [SerializeField] private SemanticKey _animParameter;  
+    [SerializeField] private Animator _animator;
+    
+    private void Update()  
+    {  
+        // Implicitly converts _animParameter to its string Value  
+        _animator.SetTrigger(_animParameter);   
+    }
 
 ### **2\. Null Safety (The "None" Pattern)**
 
@@ -40,16 +40,16 @@ private void Update()
 * Its `Value` property returns `""` (empty string).  
 * To check for "null", compare against `SemanticKey.None` or check `.IsValid`.
 
-public void PlaySound(SemanticKey soundId)  
-{  
-    // Safe check \- no NullReferenceException possible  
-    if (\!soundId.IsValid) return;   
-      
-    // OR  
-    if (soundId \== SemanticKey.None) return;
-
-    AudioManager.Play(soundId);  
-}
+    public void PlaySound(SemanticKey soundId)  
+    {  
+        // Safe check - no NullReferenceException possible  
+        if (!soundId.IsValid) return;   
+          
+        // OR  
+        if (soundId == SemanticKey.None) return;
+    
+        AudioManager.Play(soundId);  
+    }
 
 ### **3\. Equality & Identity**
 
@@ -62,22 +62,22 @@ Equality comparisons (`==`, `!=`, `Equals()`) use the **GUID**, not the string v
 3. Your player prefab still has the stale cache: `Value="Fireball"`, `Guid="A1"`.  
 4. Your code references the static class: `Spells.FireBlast` (which has `Value="FireBlast"`, `Guid="A1"`).
 
-// Returns TRUE because GUIDs match (A1 \== A1)  
-if (playerPrefab.spellKey \== Spells.FireBlast)   
-{  
-    // Logic works correctly even though the strings ("Fireball" vs "FireBlast") differ.  
-}
+    // Returns TRUE because GUIDs match (A1 == A1)  
+    if (playerPrefab.spellKey == Spells.FireBlast)   
+    {  
+        // Logic works correctly even though the strings ("Fireball" vs "FireBlast") differ.  
+    }
 
 ### **4\. Dictionary Keys**
 
 `SemanticKey` implements `IEquatable<T>` and overrides `GetHashCode()`. It is highly efficient as a key in `Dictionary` or `HashSet`.
 
-private Dictionary\<SemanticKey, float\> \_cooldowns \= new();
-
-public void StartCooldown(SemanticKey skill)  
-{  
-    \_cooldowns\[skill\] \= Time.time \+ 5.0f;  
-}
+    private Dictionary<SemanticKey, float> _cooldowns = new();
+    
+    public void StartCooldown(SemanticKey skill)  
+    {  
+        _cooldowns[skill] = Time.time + 5.0f;  
+    }
 
 ## **Performance Characteristics**
 
