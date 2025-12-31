@@ -20,18 +20,18 @@ The `[SemanticKeyFilter]` attribute is used to restrict a `SemanticKey` field in
 
 ### **Usage**
 
-using UnityEngine;  
-using SemanticKeys;
-
-public class InventoryItem : MonoBehaviour  
-{  
-    // Shows keys from Stats, Audio, AI, etc.  
-    public SemanticKey Category;
-
-    // Only shows keys from the "ItemCategories" domain  
-    \[SemanticKeyFilter("ItemCategories")\]  
-    public SemanticKey ItemType;  
-}
+    using UnityEngine;  
+    using SemanticKeys;
+    
+    public class InventoryItem : MonoBehaviour  
+    {  
+        // Shows keys from Stats, Audio, AI, etc.  
+        public SemanticKey Category;
+    
+        // Only shows keys from the "ItemCategories" domain  
+        \[SemanticKeyFilter("ItemCategories")\]  
+        public SemanticKey ItemType;  
+    }
 
 ### **Critical Warning**
 
