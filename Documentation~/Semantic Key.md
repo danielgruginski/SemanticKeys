@@ -40,16 +40,16 @@ The struct includes an implicit operator to `string`. You can pass a `SemanticKe
 * Its `Value` property returns `""` (empty string).  
 * To check for "null", compare against `SemanticKey.None` or check `.IsValid`.
 
-    public void PlaySound(SemanticKey soundId)  
-    {  
-        // Safe check - no NullReferenceException possible  
-        if (!soundId.IsValid) return;   
-          
-        // OR  
-        if (soundId == SemanticKey.None) return;
-    
-        AudioManager.Play(soundId);  
-    }
+        public void PlaySound(SemanticKey soundId)  
+        {  
+            // Safe check - no NullReferenceException possible  
+            if (!soundId.IsValid) return;   
+              
+            // OR  
+            if (soundId == SemanticKey.None) return;
+        
+            AudioManager.Play(soundId);  
+        }
 
 ### **3\. Equality & Identity**
 
@@ -62,11 +62,11 @@ Equality comparisons (`==`, `!=`, `Equals()`) use the **GUID**, not the string v
 3. Your player prefab still has the stale cache: `Value="Fireball"`, `Guid="A1"`.  
 4. Your code references the static class: `Spells.FireBlast` (which has `Value="FireBlast"`, `Guid="A1"`).
 
-    // Returns TRUE because GUIDs match (A1 == A1)  
-    if (playerPrefab.spellKey == Spells.FireBlast)   
-    {  
-        // Logic works correctly even though the strings ("Fireball" vs "FireBlast") differ.  
-    }
+        // Returns TRUE because GUIDs match (A1 == A1)  
+        if (playerPrefab.spellKey == Spells.FireBlast)   
+        {  
+            // Logic works correctly even though the strings ("Fireball" vs "FireBlast") differ.  
+        }
 
 ### **4\. Dictionary Keys**
 
