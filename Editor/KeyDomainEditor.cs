@@ -76,10 +76,7 @@ namespace SemanticKeys.Editor
                     if (_domain.RenameKey(key.Guid, _tempName))
                     {
                         _editingGuid = null;
-                        if (EditorUtility.DisplayDialog("Key Renamed", "Update all references now?", "Yes", "No"))
-                        {
-                            SemanticKeyReferenceUpdater.UpdateAllReferences();
-                        }
+                        SemanticKeyReferenceUpdater.UpdateAllReferences();
                     }
                 }
                 GUI.backgroundColor = Color.white;
@@ -129,12 +126,15 @@ namespace SemanticKeys.Editor
             {
                 if (fieldCount > 0)
                 {
+                    // Protection against auto-import freezes during bulk write
+                    AssetDatabase.StartAssetEditing();
                     try
                     {
                         EditorUtility.DisplayProgressBar("Deleting", "Resetting references...", 0.5f);
 
                         foreach (var path in results.Assets)
                         {
+                            // LoadAllAssetsAtPath is now safe because results.Assets explicitly excludes .unity files
                             var assets = AssetDatabase.LoadAllAssetsAtPath(path);
                             foreach (var asset in assets)
                             {
@@ -146,6 +146,7 @@ namespace SemanticKeys.Editor
 
                         foreach (var obj in results.SceneObjects)
                         {
+                            if (obj == null) continue;
                             var so = new SerializedObject(obj);
                             ResetInSerializedObject(so, key.Guid);
                         }
@@ -153,7 +154,11 @@ namespace SemanticKeys.Editor
                         AssetDatabase.SaveAssets();
                         if (!Application.isPlaying) UnityEditor.SceneManagement.EditorSceneManager.MarkAllScenesDirty();
                     }
-                    finally { EditorUtility.ClearProgressBar(); }
+                    finally
+                    {
+                        EditorUtility.ClearProgressBar();
+                        AssetDatabase.StopAssetEditing();
+                    }
                 }
 
                 _domain.DeleteKey(key.Guid);
@@ -176,11 +181,11 @@ namespace SemanticKeys.Editor
             {
                 Selection.objects = foundObjects.ToArray();
                 EditorGUIUtility.PingObject(foundObjects[0]);
-                EditorUtility.DisplayDialog("Find References", $"Found {results.TotalRefCount} usages across {foundObjects.Count} objects.\nObjects selected.", "OK");
+                Debug.Log($"[SemanticKeys] Found {results.TotalRefCount} usages across {foundObjects.Count} objects.");
             }
             else
             {
-                EditorUtility.DisplayDialog("Find References", "No usages found.", "OK");
+                Debug.Log("[SemanticKeys] No usages found.");
             }
         }
 
@@ -189,32 +194,32 @@ namespace SemanticKeys.Editor
             var results = new ScanResults();
             string domainPath = AssetDatabase.GetAssetPath(_domain);
 
-            // 1. Project Scan (Raw Text Pre-filter)
-            var guidsToScan = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject t:Scene");
+            // PASS 1: Raw File Pre-filter for Assets (EXCLUDING scenes)
+            // This avoids the 'Do not use ReadObjectThreaded on scene objects' error.
+            var assetGuids = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject");
 
             try
             {
-                for (int i = 0; i < guidsToScan.Length; i++)
+                for (int i = 0; i < assetGuids.Length; i++)
                 {
-                    string path = AssetDatabase.GUIDToAssetPath(guidsToScan[i]);
-                    if (path == domainPath) continue; // Skip self
+                    string path = AssetDatabase.GUIDToAssetPath(assetGuids[i]);
+                    if (path == domainPath) continue;
 
-                    if (i % 50 == 0)
-                        EditorUtility.DisplayProgressBar("Scanning", $"Pre-filtering Assets: {path}", (float)i / guidsToScan.Length);
+                    if (i % 100 == 0)
+                        EditorUtility.DisplayProgressBar("Scanning", $"Filtering Assets...", (float)i / assetGuids.Length);
 
                     if (!File.Exists(path)) continue;
 
-                    // Optimization: Read raw text to check for GUID presence
                     string content = File.ReadAllText(path);
                     if (content.Contains(targetGuid))
                     {
                         results.Assets.Add(path);
-                        // Count occurrences in raw text as an estimate
                         results.TotalRefCount += System.Text.RegularExpressions.Regex.Matches(content, targetGuid).Count;
                     }
                 }
 
-                // 2. Scene Scan (SerializedObject is unavoidable for hierarchy, but we limit it to loaded objects)
+                // PASS 2: In-memory Scene Objects
+                // Handles references in the active scene without accessing .unity files directly.
                 EditorUtility.DisplayProgressBar("Scanning", "Scanning Scene Objects...", 0.9f);
                 var sceneObjects = Resources.FindObjectsOfTypeAll<MonoBehaviour>()
                     .Cast<Object>()
