@@ -1,13 +1,14 @@
 using UnityEditor;
 using UnityEngine;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace SemanticKeys.Editor
 {
     /// <summary>
-    /// Solves the "Stale Cache" issue. 
-    /// Scans the entire project for SemanticKeys that have a valid GUID but an outdated String Value
-    /// and updates them to match the Source of Truth (KeyDomain).
+    /// Solves the "Stale Cache" issue by synchronizing cached string values with KeyDomains.
+    /// Optimized with raw pre-scanning to prevent Editor freezes during project-wide updates.
     /// </summary>
     public static class SemanticKeyReferenceUpdater
     {
@@ -33,53 +34,66 @@ namespace SemanticKeys.Editor
                 }
             }
 
-            int fixedCounter = 0;
-            int scannedCounter = 0;
+            if (guidToNameMap.Count == 0)
+            {
+                Debug.Log("[SemanticKeys] No keys found in any domain. Skipping update.");
+                return;
+            }
 
-            // --- PASS 1: PROJECT ASSETS (Prefabs & SOs) ---
-            var guidsToScan = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject");
+            int fixedCounter = 0;
+            var guidsToSync = guidToNameMap.Keys.ToList();
+
+            // --- PASS 1: PROJECT ASSETS ---
+            var assetGuids = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject");
 
             try
             {
-                // Scan Project Assets
-                foreach (var assetGuid in guidsToScan)
+                for (int i = 0; i < assetGuids.Length; i++)
                 {
-                    var path = AssetDatabase.GUIDToAssetPath(assetGuid);
-                    scannedCounter++;
-                    EditorUtility.DisplayProgressBar("Updating Semantic Keys", $"Scanning Assets: {path}...", (float)scannedCounter / (guidsToScan.Length * 2)); // *2 roughly for scene pass
+                    string path = AssetDatabase.GUIDToAssetPath(assetGuids[i]);
 
-                    var assets = AssetDatabase.LoadAllAssetsAtPath(path);
-                    foreach (var asset in assets)
+                    if (i % 50 == 0)
                     {
-                        if (asset == null) continue;
-                        var so = new SerializedObject(asset);
-                        if (ScanAndFix(so, guidToNameMap, path))
+                        float progress = (float)i / assetGuids.Length;
+                        if (EditorUtility.DisplayCancelableProgressBar("Semantic Keys", $"Scanning Assets: {path}", progress))
                         {
-                            fixedCounter++;
+                            break;
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
+
+                    // Performance Optimization: Check raw text before using SerializedObject.
+                    // This prevents Unity from loading thousands of unrelated assets into memory.
+                    string rawContent = File.ReadAllText(path);
+                    bool likelyNeedsUpdate = guidsToSync.Any(g => rawContent.Contains(g));
+
+                    if (likelyNeedsUpdate)
+                    {
+                        var assets = AssetDatabase.LoadAllAssetsAtPath(path);
+                        foreach (var asset in assets)
+                        {
+                            if (asset == null) continue;
+                            var so = new SerializedObject(asset);
+                            if (ScanAndFix(so, guidToNameMap, path))
+                            {
+                                fixedCounter++;
+                            }
                         }
                     }
                 }
 
-                // --- PASS 2: OPEN SCENE OBJECTS ---
-                // Find all MonoBehaviours in loaded scenes (excludes assets on disk)
-                var sceneObjects = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
+                // --- PASS 2: SCENE OBJECTS ---
+                EditorUtility.DisplayProgressBar("Semantic Keys", "Scanning Scene Objects...", 0.95f);
 
-                // Also scan ScriptableObjects that might be referenced in scene components but not saved as assets
-                var runtimeSOs = Resources.FindObjectsOfTypeAll<ScriptableObject>();
+                var sceneObjects = Resources.FindObjectsOfTypeAll<MonoBehaviour>()
+                    .Cast<Object>()
+                    .Concat(Resources.FindObjectsOfTypeAll<ScriptableObject>().Cast<Object>());
 
-                var allSceneObjects = new List<Object>(sceneObjects);
-                allSceneObjects.AddRange(runtimeSOs);
-
-                int sceneObjCount = 0;
-                foreach (var obj in allSceneObjects)
+                foreach (var obj in sceneObjects)
                 {
-                    sceneObjCount++;
-                    // Skip assets on disk (already handled) and internal Unity objects
                     if (EditorUtility.IsPersistent(obj)) continue;
                     if (obj.hideFlags == HideFlags.NotEditable || obj.hideFlags == HideFlags.HideAndDontSave) continue;
-
-                    if (sceneObjCount % 50 == 0) // Update bar periodically
-                        EditorUtility.DisplayProgressBar("Updating Semantic Keys", "Scanning Scene Objects...", 0.5f + ((float)sceneObjCount / allSceneObjects.Count * 0.5f));
 
                     var so = new SerializedObject(obj);
                     if (ScanAndFix(so, guidToNameMap, $"Scene Object: {obj.name}"))
@@ -87,38 +101,32 @@ namespace SemanticKeys.Editor
                         fixedCounter++;
                     }
                 }
+
+                if (fixedCounter > 0)
+                {
+                    AssetDatabase.SaveAssets();
+                    if (!Application.isPlaying)
+                    {
+                        UnityEditor.SceneManagement.EditorSceneManager.MarkAllScenesDirty();
+                    }
+                    EditorUtility.DisplayDialog("Semantic Keys", $"Update Complete.\nFixed {fixedCounter} stale references.", "OK");
+                }
+                else
+                {
+                    Debug.Log("[SemanticKeys] All references are already up to date.");
+                }
             }
             finally
             {
                 EditorUtility.ClearProgressBar();
             }
-
-            if (fixedCounter > 0)
-            {
-                AssetDatabase.SaveAssets();
-                // If we modified scene objects, we need to mark the scene as dirty
-                if (!Application.isPlaying)
-                {
-                    UnityEditor.SceneManagement.EditorSceneManager.MarkAllScenesDirty();
-                }
-                EditorUtility.DisplayDialog("Semantic Keys", $"Update Complete.\nFixed {fixedCounter} stale references.", "OK");
-            }
-            else
-            {
-                Debug.Log("[SemanticKeys] All references are already up to date.");
-            }
         }
 
-        /// <summary>
-        /// Helper to scan a SerializedObject and fix any SemanticKey properties.
-        /// Returns true if any changes were made.
-        /// </summary>
         private static bool ScanAndFix(SerializedObject so, Dictionary<string, string> guidToNameMap, string contextPath)
         {
             var prop = so.GetIterator();
             bool changed = false;
 
-            // Iterate through every single property in the file
             while (prop.Next(true))
             {
                 if (prop.type == "SemanticKey")
@@ -137,7 +145,7 @@ namespace SemanticKeys.Editor
                             {
                                 valueProp.stringValue = correctName;
                                 changed = true;
-                                Debug.Log($"[SemanticKeys] Fixed stale key in {contextPath}: '{currentValue}' -> '{correctName}'");
+                                Debug.Log($"[SemanticKeys] Syncing '{currentValue}' -> '{correctName}' in {contextPath}");
                             }
                         }
                     }
@@ -147,9 +155,8 @@ namespace SemanticKeys.Editor
             if (changed)
             {
                 so.ApplyModifiedProperties();
-                return true;
             }
-            return false;
+            return changed;
         }
     }
 }

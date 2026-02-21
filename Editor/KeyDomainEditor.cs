@@ -3,6 +3,7 @@ using UnityEngine;
 using SemanticKeys;
 using System.Linq;
 using System.Collections.Generic;
+using System.IO;
 
 namespace SemanticKeys.Editor
 {
@@ -68,7 +69,6 @@ namespace SemanticKeys.Editor
 
             if (_editingGuid == key.Guid)
             {
-                // Edit Mode
                 _tempName = EditorGUILayout.TextField(_tempName);
                 GUI.backgroundColor = Color.green;
                 if (GUILayout.Button("Save", GUILayout.Width(45)))
@@ -87,7 +87,6 @@ namespace SemanticKeys.Editor
             }
             else
             {
-                // View Mode
                 EditorGUILayout.LabelField(key.Name, EditorStyles.boldLabel);
 
                 if (GUILayout.Button("Edit", GUILayout.Width(40)))
@@ -96,7 +95,6 @@ namespace SemanticKeys.Editor
                     _tempName = key.Name;
                 }
 
-                // Find References Button
                 if (GUILayout.Button(EditorGUIUtility.IconContent("d_ViewToolZoom"), GUILayout.Width(30)))
                 {
                     FindReferences(key);
@@ -111,7 +109,6 @@ namespace SemanticKeys.Editor
             }
             EditorGUILayout.EndHorizontal();
 
-            // Read-only GUID
             GUI.enabled = false;
             EditorGUILayout.LabelField("GUID: " + key.Guid, EditorStyles.miniLabel);
             GUI.enabled = true;
@@ -120,110 +117,126 @@ namespace SemanticKeys.Editor
 
         private void DeleteKeyWithConfirmation(KeyDomain.KeyDefinition key)
         {
-            // 1. Scan for references to count them
-            var guidsToScan = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject");
-            var foundAssetPaths = new List<string>();
-            var foundSceneObjects = new List<Object>();
-            int fieldCount = 0;
+            var results = PerformOptimizationScan(key.Guid);
+            int fieldCount = results.TotalRefCount;
 
-            try
-            {
-                EditorUtility.DisplayProgressBar("Scanning", $"Checking usages of '{key.Name}'...", 0);
-
-                // Scan Assets
-                for (int i = 0; i < guidsToScan.Length; i++)
-                {
-                    var path = AssetDatabase.GUIDToAssetPath(guidsToScan[i]);
-                    var assets = AssetDatabase.LoadAllAssetsAtPath(path);
-                    foreach (var asset in assets)
-                    {
-                        if (asset == null) continue;
-                        var so = new SerializedObject(asset);
-                        int countInAsset = CountReferences(so, key.Guid);
-                        if (countInAsset > 0)
-                        {
-                            if (!foundAssetPaths.Contains(path)) foundAssetPaths.Add(path);
-                            fieldCount += countInAsset;
-                        }
-                    }
-                }
-
-                // Scan Scene Objects
-                var sceneObjects = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
-                var runtimeSOs = Resources.FindObjectsOfTypeAll<ScriptableObject>();
-                var allSceneObjects = new List<Object>(sceneObjects);
-                allSceneObjects.AddRange(runtimeSOs);
-
-                foreach (var obj in allSceneObjects)
-                {
-                    if (obj == null || EditorUtility.IsPersistent(obj)) continue;
-                    if (obj.hideFlags == HideFlags.NotEditable || obj.hideFlags == HideFlags.HideAndDontSave) continue;
-
-                    var so = new SerializedObject(obj);
-                    int countInObj = CountReferences(so, key.Guid);
-                    if (countInObj > 0)
-                    {
-                        foundSceneObjects.Add(obj);
-                        fieldCount += countInObj;
-                    }
-                }
-            }
-            finally
-            {
-                EditorUtility.ClearProgressBar();
-            }
-
-            // 2. Confirmation Dialog
             string message = fieldCount > 0
-                ? $"Found {fieldCount} references to '{key.Name}' in {foundAssetPaths.Count + foundSceneObjects.Count} objects.\n\n" +
+                ? $"Found {fieldCount} references to '{key.Name}' in {results.Assets.Count + results.SceneObjects.Count} objects.\n\n" +
                   "Deleting this key will reset these fields to 'None' (null)."
                 : $"Are you sure you want to delete '{key.Name}'?";
 
             if (EditorUtility.DisplayDialog("Delete Key", message, "Delete and Reset", "Cancel"))
             {
-                // 3. Reset References
                 if (fieldCount > 0)
                 {
                     try
                     {
                         EditorUtility.DisplayProgressBar("Deleting", "Resetting references...", 0.5f);
-                        bool changed = false;
 
-                        // Reset Assets
-                        foreach (var path in foundAssetPaths)
+                        foreach (var path in results.Assets)
                         {
                             var assets = AssetDatabase.LoadAllAssetsAtPath(path);
                             foreach (var asset in assets)
                             {
                                 if (asset == null) continue;
                                 var so = new SerializedObject(asset);
-                                if (ResetInSerializedObject(so, key.Guid)) changed = true;
+                                ResetInSerializedObject(so, key.Guid);
                             }
                         }
 
-                        // Reset Scene Objects
-                        foreach (var obj in foundSceneObjects)
+                        foreach (var obj in results.SceneObjects)
                         {
-                            if (obj == null) continue;
                             var so = new SerializedObject(obj);
-                            if (ResetInSerializedObject(so, key.Guid)) changed = true;
+                            ResetInSerializedObject(so, key.Guid);
                         }
 
-                        if (changed)
-                        {
-                            AssetDatabase.SaveAssets();
-                            if (!Application.isPlaying) UnityEditor.SceneManagement.EditorSceneManager.MarkAllScenesDirty();
-                        }
+                        AssetDatabase.SaveAssets();
+                        if (!Application.isPlaying) UnityEditor.SceneManagement.EditorSceneManager.MarkAllScenesDirty();
                     }
-                    finally
+                    finally { EditorUtility.ClearProgressBar(); }
+                }
+
+                _domain.DeleteKey(key.Guid);
+            }
+        }
+
+        private void FindReferences(KeyDomain.KeyDefinition key)
+        {
+            var results = PerformOptimizationScan(key.Guid);
+            var foundObjects = new List<Object>();
+
+            foreach (var path in results.Assets)
+            {
+                var asset = AssetDatabase.LoadMainAssetAtPath(path);
+                if (asset != null) foundObjects.Add(asset);
+            }
+            foundObjects.AddRange(results.SceneObjects);
+
+            if (foundObjects.Count > 0)
+            {
+                Selection.objects = foundObjects.ToArray();
+                EditorGUIUtility.PingObject(foundObjects[0]);
+                EditorUtility.DisplayDialog("Find References", $"Found {results.TotalRefCount} usages across {foundObjects.Count} objects.\nObjects selected.", "OK");
+            }
+            else
+            {
+                EditorUtility.DisplayDialog("Find References", "No usages found.", "OK");
+            }
+        }
+
+        private ScanResults PerformOptimizationScan(string targetGuid)
+        {
+            var results = new ScanResults();
+            string domainPath = AssetDatabase.GetAssetPath(_domain);
+
+            // 1. Project Scan (Raw Text Pre-filter)
+            var guidsToScan = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject t:Scene");
+
+            try
+            {
+                for (int i = 0; i < guidsToScan.Length; i++)
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guidsToScan[i]);
+                    if (path == domainPath) continue; // Skip self
+
+                    if (i % 50 == 0)
+                        EditorUtility.DisplayProgressBar("Scanning", $"Pre-filtering Assets: {path}", (float)i / guidsToScan.Length);
+
+                    if (!File.Exists(path)) continue;
+
+                    // Optimization: Read raw text to check for GUID presence
+                    string content = File.ReadAllText(path);
+                    if (content.Contains(targetGuid))
                     {
-                        EditorUtility.ClearProgressBar();
+                        results.Assets.Add(path);
+                        // Count occurrences in raw text as an estimate
+                        results.TotalRefCount += System.Text.RegularExpressions.Regex.Matches(content, targetGuid).Count;
                     }
                 }
 
-                // 4. Delete Key
-                _domain.DeleteKey(key.Guid);
+                // 2. Scene Scan (SerializedObject is unavoidable for hierarchy, but we limit it to loaded objects)
+                EditorUtility.DisplayProgressBar("Scanning", "Scanning Scene Objects...", 0.9f);
+                var sceneObjects = Resources.FindObjectsOfTypeAll<MonoBehaviour>()
+                    .Cast<Object>()
+                    .Concat(Resources.FindObjectsOfTypeAll<ScriptableObject>().Cast<Object>());
+
+                foreach (var obj in sceneObjects)
+                {
+                    if (obj == null || EditorUtility.IsPersistent(obj)) continue;
+                    if (obj.hideFlags == HideFlags.NotEditable || obj.hideFlags == HideFlags.HideAndDontSave) continue;
+
+                    var so = new SerializedObject(obj);
+                    int count = CountReferences(so, targetGuid);
+                    if (count > 0)
+                    {
+                        results.SceneObjects.Add(obj is Component c ? c.gameObject : obj);
+                        results.TotalRefCount += count;
+                    }
+                }
             }
+            finally { EditorUtility.ClearProgressBar(); }
+
+            return results;
         }
 
         private int CountReferences(SerializedObject so, string targetGuid)
@@ -235,16 +248,13 @@ namespace SemanticKeys.Editor
                 if (prop.type == "SemanticKey")
                 {
                     var guidProp = prop.FindPropertyRelative("_guid");
-                    if (guidProp != null && guidProp.stringValue == targetGuid)
-                    {
-                        count++;
-                    }
+                    if (guidProp != null && guidProp.stringValue == targetGuid) count++;
                 }
             }
             return count;
         }
 
-        private bool ResetInSerializedObject(SerializedObject so, string targetGuid)
+        private void ResetInSerializedObject(SerializedObject so, string targetGuid)
         {
             bool changed = false;
             var prop = so.GetIterator();
@@ -255,100 +265,23 @@ namespace SemanticKeys.Editor
                     var guidProp = prop.FindPropertyRelative("_guid");
                     if (guidProp != null && guidProp.stringValue == targetGuid)
                     {
-                        var valueProp = prop.FindPropertyRelative("_value");
-                        var domainProp = prop.FindPropertyRelative("_domainGuid");
-
                         guidProp.stringValue = string.Empty;
-                        valueProp.stringValue = string.Empty;
-                        if (domainProp != null) domainProp.stringValue = string.Empty;
-
+                        var valProp = prop.FindPropertyRelative("_value");
+                        if (valProp != null) valProp.stringValue = string.Empty;
+                        var domProp = prop.FindPropertyRelative("_domainGuid");
+                        if (domProp != null) domProp.stringValue = string.Empty;
                         changed = true;
                     }
                 }
             }
-
             if (changed) so.ApplyModifiedProperties();
-            return changed;
         }
 
-        private void FindReferences(KeyDomain.KeyDefinition key)
+        private class ScanResults
         {
-            // PASS 1: Scan Assets (Prefabs, ScriptableObjects) - Removed t:Scene to avoid crash
-            var guidsToScan = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject");
-            var foundObjects = new List<Object>();
-
-            try
-            {
-                // 1. Assets on Disk
-                EditorUtility.DisplayProgressBar("Scanning", $"Finding usages of '{key.Name}' in Assets...", 0);
-                for (int i = 0; i < guidsToScan.Length; i++)
-                {
-                    var path = AssetDatabase.GUIDToAssetPath(guidsToScan[i]);
-                    var assets = AssetDatabase.LoadAllAssetsAtPath(path);
-                    foreach (var asset in assets)
-                    {
-                        if (asset == null) continue;
-                        var so = new SerializedObject(asset);
-                        if (HasReference(so, key.Guid))
-                        {
-                            foundObjects.Add(asset);
-                            break; // Found one instance in this asset, move to next file
-                        }
-                    }
-                }
-
-                // 2. Objects in Open Scenes
-                EditorUtility.DisplayProgressBar("Scanning", $"Finding usages of '{key.Name}' in Scene...", 0.8f);
-                var sceneObjects = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
-                var runtimeSOs = Resources.FindObjectsOfTypeAll<ScriptableObject>();
-
-                var allSceneObjects = new List<Object>(sceneObjects);
-                allSceneObjects.AddRange(runtimeSOs);
-
-                foreach (var obj in allSceneObjects)
-                {
-                    if (obj == null) continue;
-                    // Skip assets on disk (already handled) and internal objects
-                    if (EditorUtility.IsPersistent(obj)) continue;
-                    if (obj.hideFlags == HideFlags.NotEditable || obj.hideFlags == HideFlags.HideAndDontSave) continue;
-
-                    var so = new SerializedObject(obj);
-                    if (HasReference(so, key.Guid))
-                    {
-                        // Add the GameObject if it's a component, otherwise the object itself
-                        foundObjects.Add(obj is Component c ? c.gameObject : obj);
-                    }
-                }
-            }
-            finally { EditorUtility.ClearProgressBar(); }
-
-            if (foundObjects.Count > 0)
-            {
-                Selection.objects = foundObjects.ToArray();
-                EditorGUIUtility.PingObject(foundObjects[0]);
-                EditorUtility.DisplayDialog("Find References", $"Found {foundObjects.Count} usages.\nObjects selected.", "OK");
-            }
-            else
-            {
-                EditorUtility.DisplayDialog("Find References", "No usages found.", "OK");
-            }
-        }
-
-        private bool HasReference(SerializedObject so, string targetGuid)
-        {
-            var prop = so.GetIterator();
-            while (prop.Next(true))
-            {
-                if (prop.type == "SemanticKey")
-                {
-                    var guidProp = prop.FindPropertyRelative("_guid");
-                    if (guidProp != null && guidProp.stringValue == targetGuid)
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
+            public List<string> Assets = new List<string>();
+            public List<Object> SceneObjects = new List<Object>();
+            public int TotalRefCount = 0;
         }
     }
 }

@@ -2,9 +2,15 @@
 using UnityEngine;
 using SemanticKeys;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace SemanticKeys.Editor
 {
+    /// <summary>
+    /// Refactoring utility that swaps Semantic Key references project-wide.
+    /// Uses raw file replacement to prevent Unity Editor freezes caused by recursive deserialization.
+    /// </summary>
     public class SemanticKeyReplacerWindow : EditorWindow
     {
         [MenuItem("Tools/SemanticKeys/Key Replacer Tool")]
@@ -13,10 +19,10 @@ namespace SemanticKeys.Editor
             GetWindow<SemanticKeyReplacerWindow>("Key Replacer");
         }
 
-        // We use a temporary ScriptableObject just to leverage the PropertyDrawer 
-        // because drawing SemanticKey manually is complex without SerializedProperties.
         private ReplacerContainer _container;
         private SerializedObject _serializedContainer;
+        private Vector2 _logScroll;
+        private List<string> _log = new List<string>();
 
         private void OnEnable()
         {
@@ -26,14 +32,14 @@ namespace SemanticKeys.Editor
 
         private void OnDisable()
         {
-            DestroyImmediate(_container);
+            if (_container != null) DestroyImmediate(_container);
         }
 
         private void OnGUI()
         {
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Replace Semantic Key References", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("This tool scans the entire project and replaces all occurrences of the 'From' key with the 'To' key.", MessageType.Info);
+            EditorGUILayout.LabelField("Global Semantic Key Replacer", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("This tool modifies .prefab, .unity, and .asset files directly as text to avoid memory freezes.", MessageType.Info);
             EditorGUILayout.Space();
 
             _serializedContainer.Update();
@@ -48,176 +54,123 @@ namespace SemanticKeys.Editor
 
             EditorGUILayout.Space(20);
 
-            if (!_container.From.IsValid)
+            bool canExecute = _container.From.IsValid && _container.To.IsValid && _container.From.Guid != _container.To.Guid;
+
+            if (!canExecute)
             {
-                EditorGUILayout.HelpBox("Select a source key.", MessageType.Warning);
-                GUI.enabled = false;
-            }
-            else if (!_container.To.IsValid)
-            {
-                EditorGUILayout.HelpBox("Select a target key.", MessageType.Warning);
+                EditorGUILayout.HelpBox("Select two different valid keys to begin.", MessageType.None);
                 GUI.enabled = false;
             }
 
-            if (GUILayout.Button("Replace All", GUILayout.Height(40)))
+            if (GUILayout.Button("Execute Global Replacement", GUILayout.Height(40)))
             {
-                // --- Domain Mismatch Check ---
-                var fromDomainGuid = _serializedContainer.FindProperty("From").FindPropertyRelative("_domainGuid")?.stringValue;
-                var toDomainProp = _serializedContainer.FindProperty("To").FindPropertyRelative("_domainGuid");
-                var toDomainGuid = toDomainProp?.stringValue;
-
-                if (fromDomainGuid != toDomainGuid)
-                {
-                    string fromName = GetDomainName(fromDomainGuid);
-                    string toName = GetDomainName(toDomainGuid);
-
-                    if (!EditorUtility.DisplayDialog("Domain Mismatch Warning",
-                        $"You are changing keys between different domains:\n\nFrom: '{fromName}'\nTo: '{toName}'\n\n" +
-                        "This may break fields restricted by [SemanticKeyFilter].\n\n" +
-                        "Do you want to proceed?",
-                        "Yes, Proceed", "Cancel"))
-                    {
-                        return;
-                    }
-                }
-
-                if (EditorUtility.DisplayDialog("Confirm Replace",
-                    $"Are you sure you want to replace ALL references of '{_container.From.Value}' with '{_container.To.Value}'?\nThis cannot be easily undone.",
-                    "Yes, Replace", "Cancel"))
-                {
-                    string safeToDomainGuid = toDomainGuid ?? "";
-                    ReplaceReferences(_container.From, _container.To, safeToDomainGuid);
-                }
+                ExecuteReplacement();
             }
             GUI.enabled = true;
+
+            DrawLog();
         }
 
-        private string GetDomainName(string domainGuid)
+        private void DrawLog()
         {
-            if (string.IsNullOrEmpty(domainGuid)) return "None";
-
-            // O(N) lookup but N is small (number of domains) and this is a button click event.
-            var guids = AssetDatabase.FindAssets("t:KeyDomain");
-            foreach (var g in guids)
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Session Log", EditorStyles.miniBoldLabel);
+            _logScroll = EditorGUILayout.BeginScrollView(_logScroll, GUI.skin.box, GUILayout.Height(150));
+            if (_log.Count == 0) EditorGUILayout.LabelField("Ready.", EditorStyles.miniLabel);
+            foreach (var line in _log)
             {
-                var path = AssetDatabase.GUIDToAssetPath(g);
-                var domain = AssetDatabase.LoadAssetAtPath<KeyDomain>(path);
-                if (domain != null && domain.Guid == domainGuid)
-                {
-                    return domain.DomainName;
-                }
+                EditorGUILayout.LabelField(line, EditorStyles.miniLabel);
             }
-            return "Unknown";
+            EditorGUILayout.EndScrollView();
+            if (_log.Count > 0 && GUILayout.Button("Clear Log", GUILayout.Width(70))) _log.Clear();
         }
 
-        private void ReplaceReferences(SemanticKey from, SemanticKey to, string toDomainGuid)
+        private void ExecuteReplacement()
         {
-            // PASS 1: Scan Assets (Prefabs, ScriptableObjects) - Removed t:Scene
-            var guidsToScan = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject");
-            int count = 0;
+            var fromProp = _serializedContainer.FindProperty("From");
+            var toProp = _serializedContainer.FindProperty("To");
+
+            string fromGuid = fromProp.FindPropertyRelative("_guid").stringValue;
+            string toGuid = toProp.FindPropertyRelative("_guid").stringValue;
+
+            // One initial confirmation for project-wide modification
+            if (EditorUtility.DisplayDialog("Confirm Replacement",
+                $"This will replace all references of the selected key project-wide.\n\n" +
+                "KeyDomain assets will be skipped. Back up your project first.",
+                "Execute", "Cancel"))
+            {
+                PerformRawReplacement(fromGuid, toGuid);
+
+                // Automatically synchronize cached names after GUID swap to maintain data integrity
+                SemanticKeyReferenceUpdater.UpdateAllReferences();
+
+                GUIUtility.ExitGUI();
+            }
+        }
+
+        private void PerformRawReplacement(string fromGuid, string toGuid)
+        {
+            _log.Clear();
+            _log.Add($"[Start] Searching for GUID: {fromGuid}");
+
+            var domainGuids = new HashSet<string>(AssetDatabase.FindAssets("t:KeyDomain"));
+            string[] allAssetGuids = AssetDatabase.FindAssets("t:Prefab t:Scene t:ScriptableObject");
+            int updatedCount = 0;
+
+            // CRITICAL: Prevent scene reloads and auto-imports mid-process
+            AssetDatabase.StartAssetEditing();
 
             try
             {
-                for (int i = 0; i < guidsToScan.Length; i++)
+                for (int i = 0; i < allAssetGuids.Length; i++)
                 {
-                    var path = AssetDatabase.GUIDToAssetPath(guidsToScan[i]);
-                    EditorUtility.DisplayProgressBar("Replacing Keys", $"Scanning Assets: {path}", (float)i / guidsToScan.Length);
+                    string assetGuid = allAssetGuids[i];
 
-                    var assets = AssetDatabase.LoadAllAssetsAtPath(path);
-                    foreach (var asset in assets)
+                    if (domainGuids.Contains(assetGuid))
                     {
-                        if (asset == null) continue;
+                        continue;
+                    }
 
-                        var so = new SerializedObject(asset);
-                        if (ReplaceInSerializedObject(so, from, to, toDomainGuid))
-                        {
-                            count++;
-                        }
+                    string path = AssetDatabase.GUIDToAssetPath(assetGuid);
+                    float progress = (float)i / allAssetGuids.Length;
+
+                    if (EditorUtility.DisplayCancelableProgressBar("Replacing SemanticKeys", $"Scanning: {path}", progress))
+                    {
+                        _log.Add("[Cancelled] Operation aborted by user.");
+                        break;
+                    }
+
+                    if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
+
+                    string content = File.ReadAllText(path);
+
+                    if (content.Contains(fromGuid))
+                    {
+                        content = content.Replace(fromGuid, toGuid);
+                        File.WriteAllText(path, content);
+
+                        updatedCount++;
+                        _log.Add($"[Updated] {path}");
                     }
                 }
 
-                // PASS 2: Scan Open Scene Objects
-                EditorUtility.DisplayProgressBar("Replacing Keys", "Scanning Scene Objects...", 1.0f);
-
-                var allObjects = new List<Object>();
-                allObjects.AddRange(Resources.FindObjectsOfTypeAll<MonoBehaviour>());
-                allObjects.AddRange(Resources.FindObjectsOfTypeAll<ScriptableObject>());
-
-                foreach (var obj in allObjects)
-                {
-                    // Skip assets on disk (handled in Pass 1) and internal engine objects
-                    if (EditorUtility.IsPersistent(obj)) continue;
-                    if (obj.hideFlags == HideFlags.NotEditable || obj.hideFlags == HideFlags.HideAndDontSave) continue;
-
-                    // Skip the tool's own internal container so we don't modify the "From" field during execution
-                    if (obj == _container) continue;
-
-                    var so = new SerializedObject(obj);
-                    if (ReplaceInSerializedObject(so, from, to, toDomainGuid))
-                    {
-                        count++;
-                    }
-                }
-
-                if (count > 0)
-                {
-                    AssetDatabase.SaveAssets();
-                    if (!Application.isPlaying)
-                    {
-                        UnityEditor.SceneManagement.EditorSceneManager.MarkAllScenesDirty();
-                    }
-                    EditorUtility.DisplayDialog("Complete", $"Replaced {count} references.", "OK");
-                }
-                else
-                {
-                    EditorUtility.DisplayDialog("Complete", "No matching references found to replace.", "OK");
-                }
+                AssetDatabase.SaveAssets();
+                _log.Add($"[Finished] Updated {updatedCount} files.");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[KeyReplacer] Critical Error: {e.Message}");
+                _log.Add($"[Error] {e.Message}");
             }
             finally
             {
                 EditorUtility.ClearProgressBar();
+                // Resume normal Unity asset tracking and trigger single re-import
+                AssetDatabase.StopAssetEditing();
+                AssetDatabase.Refresh();
             }
         }
 
-        private bool ReplaceInSerializedObject(SerializedObject so, SemanticKey from, SemanticKey to, string toDomainGuid)
-        {
-            var prop = so.GetIterator();
-            bool changed = false;
-
-            while (prop.Next(true))
-            {
-                if (prop.type == "SemanticKey")
-                {
-                    var guidProp = prop.FindPropertyRelative("_guid");
-
-                    // Match by GUID (Identity)
-                    if (guidProp != null && guidProp.stringValue == from.Guid)
-                    {
-                        var valueProp = prop.FindPropertyRelative("_value");
-                        var domainProp = prop.FindPropertyRelative("_domainGuid");
-
-                        // Swap
-                        guidProp.stringValue = to.Guid;
-                        valueProp.stringValue = to.Value;
-                        if (domainProp != null)
-                        {
-                            domainProp.stringValue = toDomainGuid;
-                        }
-
-                        changed = true;
-                    }
-                }
-            }
-
-            if (changed)
-            {
-                so.ApplyModifiedProperties();
-                return true;
-            }
-            return false;
-        }
-
-        // Internal container to use SerializedObject system
         private class ReplacerContainer : ScriptableObject
         {
             public SemanticKey From;
