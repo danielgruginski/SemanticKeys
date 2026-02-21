@@ -29,6 +29,19 @@ namespace SemanticKeys
         public string Guid => _guid;
         public bool IsValid => !string.IsNullOrEmpty(_guid) && !string.IsNullOrEmpty(_value);
 
+        /// <summary>
+        /// Creates a SemanticKey from a raw string. 
+        /// WARNING: Use this ONLY for Unit Tests or Prototyping. 
+        /// This key will NOT be updated by the Reference Updater tool and 
+        /// will not match keys created via KeyDomains.
+        /// </summary>
+        public static SemanticKey FromRawString(string value)
+        {
+            // We use the value as the GUID so that two "Raw" keys 
+            // created with the same string will at least be equal to each other.
+            return new SemanticKey(value, value, null);
+        }
+
         public SemanticKey(string guid, string value, string domainGuid)
         {
             _guid = guid;
