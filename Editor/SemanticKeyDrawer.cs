@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -13,7 +14,6 @@ namespace SemanticKeys.Editor
             // Locate properties
             var guidProp = property.FindPropertyRelative("_guid");
             var valueProp = property.FindPropertyRelative("_value");
-            var domainGuidProp = property.FindPropertyRelative("_domainGuid");
 
             // Draw Label
             position = EditorGUI.PrefixLabel(position, GUIUtility.GetControlID(FocusType.Passive), label);
@@ -24,6 +24,11 @@ namespace SemanticKeys.Editor
             if (string.IsNullOrEmpty(currentName))
             {
                 currentName = "None";
+            }
+            // The selected objects hold different keys: show Unity's mixed-value dash
+            if (guidProp.hasMultipleDifferentValues)
+            {
+                currentName = "\u2014";
             }
 
             var style = EditorStyles.popup;
@@ -40,20 +45,36 @@ namespace SemanticKeys.Editor
                     filterDomain = ((SemanticKeyFilterAttribute)attributes[0]).DomainName;
                 }
 
-                var dropdown = new SemanticKeyDropdown(new UnityEditor.IMGUI.Controls.AdvancedDropdownState(), filterDomain);
-                dropdown.OnItemSelected += (item) =>
-                {
-                    // Apply changes
-                    guidProp.stringValue = item.Guid;
-                    valueProp.stringValue = item.Value;
-                    domainGuidProp.stringValue = item.DomainGuid;
+                // The selection arrives after this OnGUI call (for "+ Add Key", after another window closes),
+                // when 'property' may no longer be valid. Keep its objects and path, and find it again then.
+                var targets = property.serializedObject.targetObjects;
+                var propertyPath = property.propertyPath;
 
-                    property.serializedObject.ApplyModifiedProperties();
-                };
+                var dropdown = new SemanticKeyDropdown(new UnityEditor.IMGUI.Controls.AdvancedDropdownState(), filterDomain);
+                dropdown.OnItemSelected += (item) => ApplySelection(targets, propertyPath, item);
                 dropdown.Show(position);
             }
 
             EditorGUI.EndProperty();
+        }
+
+        private static void ApplySelection(Object[] targets, string propertyPath, SemanticKeyItem item)
+        {
+            var liveTargets = targets.Where(t => t != null).ToArray();
+            if (liveTargets.Length == 0) return;
+
+            using (var serializedObject = new SerializedObject(liveTargets))
+            {
+                var property = serializedObject.FindProperty(propertyPath);
+                if (property == null) return;
+
+                // Apply changes (to every selected object)
+                property.FindPropertyRelative("_guid").stringValue = item.Guid;
+                property.FindPropertyRelative("_value").stringValue = item.Value;
+                property.FindPropertyRelative("_domainGuid").stringValue = item.DomainGuid;
+
+                serializedObject.ApplyModifiedProperties();
+            }
         }
     }
 }

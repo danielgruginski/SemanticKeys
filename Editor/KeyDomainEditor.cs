@@ -56,7 +56,11 @@ namespace SemanticKeys.Editor
             EditorGUILayout.Space(5);
             if (GUILayout.Button("+ Add New Key", GUILayout.Height(25)))
             {
-                SemanticKeyInputWindow.Open("Add Key", "Name:", (n) => _domain.AddKey(n));
+                SemanticKeyInputWindow.Open("Add Key", "Name:", (n) =>
+                {
+                    _domain.AddKey(n);
+                    _domain.UpdateGeneratedCode();
+                });
             }
 
             serializedObject.ApplyModifiedProperties();
@@ -76,6 +80,7 @@ namespace SemanticKeys.Editor
                     if (_domain.RenameKey(key.Guid, _tempName))
                     {
                         _editingGuid = null;
+                        _domain.UpdateGeneratedCode();
                         SemanticKeyReferenceUpdater.UpdateAllReferences();
                     }
                 }
@@ -162,6 +167,7 @@ namespace SemanticKeys.Editor
                 }
 
                 _domain.DeleteKey(key.Guid);
+                _domain.UpdateGeneratedCode();
             }
         }
 
