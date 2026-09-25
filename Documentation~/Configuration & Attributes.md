@@ -2,9 +2,9 @@
 
 ## **Semantic Keys Settings**
 
-The package relies on a singleton `ScriptableObject` to store project-wide settings. This asset is automatically created the first time you interact with the system.
+The package relies on a singleton `ScriptableObject` to store project-wide settings. This asset is **not** created automatically: create it with **Create** \> **SemanticKeys** \> **Settings** in the Project window. Until it exists, the package uses the defaults below, and there is nothing to edit.
 
-**Location:** `Assets/Data/SemanticKeys/SemanticKeysSettings.asset`
+**Suggested location:** `Assets/Data/SemanticKeys/SemanticKeysSettings.asset`
 
 | Setting | Default | Description |
 | ----- | ----- | ----- |
