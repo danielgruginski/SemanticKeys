@@ -100,7 +100,7 @@ namespace SemanticKeys.Editor
 
             if (EditorUtility.DisplayDialog("Confirm Replacement",
                 $"Replace all references of '{_from.Value}' with '{_to.Value}' project-wide?\n\n" +
-                "This will modify assets on disk and objects in the current scene.",
+                "This will modify assets on disk and objects in the current scene. Unsaved changes to assets are saved first.",
                 "Execute", "Cancel"))
             {
                 PerformHybridReplacement(fromGuid, toGuid, toValue, toDomain);
@@ -118,6 +118,10 @@ namespace SemanticKeys.Editor
             _log.Add($"[Start] Swapping GUID: {fromGuid} -> {toGuid}");
 
             var domainGuids = new HashSet<string>(AssetDatabase.FindAssets("t:KeyDomain"));
+
+            // Save pending changes first: an asset with unsaved changes would otherwise be written back
+            // over the text edits below the next time Unity saves it.
+            AssetDatabase.SaveAssets();
 
             // PASS 1: Raw File Replacement for Assets (Explicitly excluding .unity files)
             string[] assetGuids = AssetDatabase.FindAssets("t:Prefab t:ScriptableObject");
@@ -151,6 +155,9 @@ namespace SemanticKeys.Editor
                 AssetDatabase.StopAssetEditing();
             }
 
+            // Reimport the edited files so the assets in memory (and prefab instances in open scenes) match the disk.
+            if (updatedFiles > 0) AssetDatabase.Refresh();
+
             // PASS 2: Object-based Replacement for Scene Objects
             // This prevents "Scene modified" popups and crashes by using Unity's official API for in-memory objects.
             int updatedSceneObjects = 0;
@@ -173,8 +180,6 @@ namespace SemanticKeys.Editor
                 }
             }
 
-            AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh();
             EditorUtility.ClearProgressBar();
 
             _log.Add($"[Finished] Updated {updatedFiles} assets and {updatedSceneObjects} scene objects.");

@@ -134,17 +134,14 @@ namespace SemanticKeys.Editor
 
         private void CreateKeyInDomain(KeyDomain domain, string keyName)
         {
-            domain.AddKey(keyName);
+            // AddKey returns the existing key if the name is taken (ignoring case), so select whichever key it returns.
+            var key = domain.AddKey(keyName);
             AssetDatabase.SaveAssets();
 
-            // Use keyName for value, temp guid (real one generated inside AddKey)
-            // Ideally we'd fetch the real guid but for UI update 'temp' is fine as long as we reload or user re-selects later
-            // For immediate correctness, we can try to find the key we just added:
-            var addedKey = System.Linq.Enumerable.FirstOrDefault(domain.Keys, k => k.Name == keyName);
-            string realGuid = addedKey != null ? addedKey.Guid : "temp";
-
-            var newItem = new SemanticKeyItem(keyName, keyName, realGuid, domain.Guid);
+            var newItem = new SemanticKeyItem(key.Name, key.Name, key.Guid, domain.Guid);
             OnItemSelected?.Invoke(newItem);
+
+            domain.UpdateGeneratedCode();
         }
     }
 }

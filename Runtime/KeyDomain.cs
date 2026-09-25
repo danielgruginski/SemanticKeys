@@ -39,6 +39,8 @@ namespace SemanticKeys
         }
 
         [SerializeField] private string _domainName;
+        // Serialized so the domain keeps its GUID across sessions (it is written into keys and generated code).
+        [SerializeField] private string _guid;
         [SerializeField] private List<KeyDefinition> _keys = new List<KeyDefinition>();
 
         // Runtime Cache
@@ -46,13 +48,23 @@ namespace SemanticKeys
 
         public string DomainName => _domainName;
         public IEnumerable<KeyDefinition> Keys => _keys;
-        public string Guid { get; private set; }
+        public string Guid => _guid;
 
         private void OnEnable()
         {
-            if (string.IsNullOrEmpty(Guid)) Guid = System.Guid.NewGuid().ToString();
+            EnsureGuid();
             if (string.IsNullOrEmpty(_domainName)) _domainName = name;
             RebuildLookup();
+        }
+
+        private void EnsureGuid()
+        {
+            if (!string.IsNullOrEmpty(_guid)) return;
+            _guid = System.Guid.NewGuid().ToString();
+#if UNITY_EDITOR
+            // Domains saved before the GUID was serialized get one now; mark them dirty so it is saved.
+            EditorUtility.SetDirty(this);
+#endif
         }
 
         public void OnBeforeSerialize() { }
@@ -90,7 +102,7 @@ namespace SemanticKeys
 #if UNITY_EDITOR
         private void OnValidate()
         {
-            if (string.IsNullOrEmpty(Guid)) Guid = System.Guid.NewGuid().ToString();
+            EnsureGuid();
             if (_keys != null)
             {
                 var seenGuids = new HashSet<string>();
@@ -171,7 +183,7 @@ namespace SemanticKeys
 
             // Cleanup old code
             var settings = SemanticKeysSettings.GetOrCreateSettings();
-            string oldFilePath = Path.Combine(settings.GeneratedCodePath, $"{oldClassName}.cs").Replace("\\", "/");
+            string oldFilePath = GetGeneratedFilePath(settings, oldClassName);
             if (File.Exists(oldFilePath)) AssetDatabase.DeleteAsset(oldFilePath);
 
             GenerateCode();
@@ -182,12 +194,53 @@ namespace SemanticKeys
         [ContextMenu("Generate Static Class")]
         public void GenerateCode()
         {
+            string className = SanitizeClassName(_domainName);
+            if (className.Length == 0)
+            {
+                Debug.LogError($"[SemanticKeys] Cannot generate a class for domain '{_domainName}': its name has no letters or digits.");
+                return;
+            }
+
             var settings = SemanticKeysSettings.GetOrCreateSettings();
             string folderPath = settings.GeneratedCodePath;
-            string targetNamespace = settings.GeneratedNamespace;
+            string filePath = GetGeneratedFilePath(settings, className);
+            string code = GenerateCodeText(settings.GeneratedNamespace);
 
-            if (!Directory.Exists(folderPath)) Directory.CreateDirectory(folderPath);
+            try
+            {
+                if (!Directory.Exists(folderPath)) Directory.CreateDirectory(folderPath);
 
+                // Leave an up-to-date file alone, so regenerating doesn't trigger a recompile.
+                if (File.Exists(filePath) && File.ReadAllText(filePath) == code) return;
+
+                File.WriteAllText(filePath, code);
+                AssetDatabase.Refresh();
+            }
+            catch (Exception e) { Debug.LogError($"[SemanticKeys] Generation failed: {e.Message}"); }
+        }
+
+        /// <summary>
+        /// Regenerates the static class if it was generated before, so it never keeps renamed or deleted keys.
+        /// Returns false, and generates nothing, if the class has no file in the Generated Code Path.
+        /// </summary>
+        public bool UpdateGeneratedCode()
+        {
+            string className = SanitizeClassName(_domainName);
+            if (className.Length == 0) return false;
+
+            var settings = SemanticKeysSettings.GetOrCreateSettings();
+            if (!File.Exists(GetGeneratedFilePath(settings, className))) return false;
+
+            GenerateCode();
+            return true;
+        }
+
+        /// <summary>
+        /// The source of the static class. Names are made valid identifiers (see <see cref="SanitizeVariableName"/>);
+        /// a name taken by an earlier key, or by the class itself, gets a numeric suffix.
+        /// </summary>
+        internal string GenerateCodeText(string targetNamespace)
+        {
             string className = SanitizeClassName(_domainName);
             var sb = new System.Text.StringBuilder();
 
@@ -199,12 +252,14 @@ namespace SemanticKeys
             sb.AppendLine("{");
             sb.AppendLine($"    using SemanticKeys;");
             sb.AppendLine("");
-            sb.AppendLine($"    public static class {className}");
+            sb.AppendLine($"    public static class {EscapeKeyword(className)}");
             sb.AppendLine("    {");
 
-            HashSet<string> usedNames = new HashSet<string>();
+            // A member can't have the name of its class (CS0542).
+            HashSet<string> usedNames = new HashSet<string> { className };
             foreach (var key in _keys)
             {
+                if (key == null) continue;
                 string variableName = SanitizeVariableName(key.Name);
                 if (usedNames.Contains(variableName))
                 {
@@ -213,26 +268,76 @@ namespace SemanticKeys
                     variableName = $"{variableName}_{index}";
                 }
                 usedNames.Add(variableName);
-                sb.AppendLine($"        public static readonly SemanticKey {variableName} = new SemanticKey(\"{key.Guid}\", \"{key.Name}\", \"{this.Guid}\");");
+                sb.AppendLine($"        public static readonly SemanticKey {EscapeKeyword(variableName)} = new SemanticKey({ToStringLiteral(key.Guid)}, {ToStringLiteral(key.Name)}, {ToStringLiteral(_guid)});");
             }
             sb.AppendLine("    }");
             sb.AppendLine("}");
-
-            try
-            {
-                File.WriteAllText(Path.Combine(folderPath, $"{className}.cs"), sb.ToString());
-                AssetDatabase.Refresh();
-            }
-            catch (Exception e) { Debug.LogError($"[SemanticKeys] Generation failed: {e.Message}"); }
+            return sb.ToString();
         }
 
-        private string SanitizeClassName(string input) => Regex.Replace(input, @"[^a-zA-Z0-9_]", "");
+        private static string GetGeneratedFilePath(SemanticKeysSettings settings, string className) =>
+            Path.Combine(settings.GeneratedCodePath, $"{className}.cs").Replace("\\", "/");
 
-        private string SanitizeVariableName(string input)
+        /// <summary>
+        /// The class name for a domain: letters, digits and underscores only, with a leading '_' if it starts
+        /// with a digit. Empty if the name has none of these characters.
+        /// </summary>
+        internal static string SanitizeClassName(string input)
         {
-            string temp = Regex.Replace(input.Replace(".", "_").Replace(" ", "_"), @"[^a-zA-Z0-9_]", "");
+            string temp = Regex.Replace(input ?? string.Empty, @"[^a-zA-Z0-9_]", "");
             if (temp.Length > 0 && char.IsDigit(temp[0])) temp = "_" + temp;
             return temp;
+        }
+
+        /// <summary>
+        /// The field name for a key: dots and spaces become '_', other characters that aren't letters, digits or
+        /// underscores are removed, and a leading digit gets a '_'. A name with nothing left becomes "Key".
+        /// </summary>
+        internal static string SanitizeVariableName(string input)
+        {
+            string temp = Regex.Replace((input ?? string.Empty).Replace(".", "_").Replace(" ", "_"), @"[^a-zA-Z0-9_]", "");
+            if (temp.Length == 0) return "Key";
+            if (char.IsDigit(temp[0])) temp = "_" + temp;
+            return temp;
+        }
+
+        private static readonly HashSet<string> CSharpKeywords = new HashSet<string>
+        {
+            "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked", "class", "const",
+            "continue", "decimal", "default", "delegate", "do", "double", "else", "enum", "event", "explicit", "extern",
+            "false", "finally", "fixed", "float", "for", "foreach", "goto", "if", "implicit", "in", "int", "interface",
+            "internal", "is", "lock", "long", "namespace", "new", "null", "object", "operator", "out", "override",
+            "params", "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed", "short",
+            "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true", "try", "typeof",
+            "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "virtual", "void", "volatile", "while",
+            "__arglist", "__makeref", "__reftype", "__refvalue"
+        };
+
+        /// <summary>Prefixes C# keywords with '@' (e.g. a key named "default" becomes the field <c>@default</c>).</summary>
+        internal static string EscapeKeyword(string identifier) =>
+            CSharpKeywords.Contains(identifier) ? "@" + identifier : identifier;
+
+        /// <summary>A C# string literal for <paramref name="value"/>: quotes, backslashes and control characters are escaped.</summary>
+        internal static string ToStringLiteral(string value)
+        {
+            var sb = new System.Text.StringBuilder("\"");
+            foreach (char c in value ?? string.Empty)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        // Other control characters and the Unicode line separators can't appear in a literal as-is.
+                        if (char.IsControl(c) || c == '\u2028' || c == '\u2029') sb.Append("\\u").Append(((int)c).ToString("x4"));
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            return sb.Append('"').ToString();
         }
 #endif
     }

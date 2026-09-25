@@ -94,5 +94,23 @@ namespace SemanticKeys.Tests
 
             Assert.IsNotEmpty(keyDef.Guid);
         }
+
+        [Test]
+        public void DomainGuid_IsSerialized()
+        {
+            // The domain GUID is written into keys and generated code, so it must survive a save and reload
+            var copy = ScriptableObject.CreateInstance<KeyDomain>();
+            try
+            {
+                JsonUtility.FromJsonOverwrite(JsonUtility.ToJson(_domain), copy);
+
+                Assert.IsNotEmpty(_domain.Guid);
+                Assert.AreEqual(_domain.Guid, copy.Guid);
+            }
+            finally
+            {
+                Object.DestroyImmediate(copy);
+            }
+        }
     }
 }
